@@ -8,6 +8,7 @@ import CUDA: AbstractGPUVector
 const FLAG_TYPE = UInt64 # Risk of error of order 1/2^64
 const FLAG = CuArray{FLAG_TYPE,1,CUDA.DeviceMemory}(undef, 0) # This is to determine the parameters of the kernel without redefining a FLAG CuArray each time.
 
+
 @inline function strided_sum(f, op, Vs, idx, strd, n, ::Val{1})
     @inbounds val = f(Vs[1][idx])
     @inbounds for i in idx+strd:strd:n
@@ -24,7 +25,6 @@ end
     end
     return val
 end
-
 @inline function strided_sum(f, op, Vs, idx, strd, n, ::Val{K}) where {K}
     @inbounds val = op(val, f((V[idx] for V in Vs)...))# Somehow less optimized than two previous functions
     @inbounds for i in idx+strd:strd:n
@@ -164,12 +164,39 @@ struct MapReduceGlmem{T}
     partial::AbstractGPUVector{T}
     flag::AbstractGPUVector{FLAG_TYPE}
 end
+
+"""
+    MapReduce
+
+A GPU-accelerated map-reduce framework using CUDA for parallel computation. 
+We initialize a callable object mpr::MapReduce whose operators f, op can dynamically change.
+It also generalizes coordinate-wise dot product.
+
+# Fields
+- `config::Union{MapReduceConfig,Nothing}`: Configuration details about the Kernel, its config, operations and datatype
+- `glmem::Union{MapReduceGlmem,Nothing}`: Global memory on the GPU of order number of blocks
+- `storeGlmem::Bool`: Whether to retain global memory allocations between operations
+
+# Example
+```julia
+N = Int(1e6)
+V = CuArray{Float64}(1:N |> collect)
+w = CUDA.ones(Float64, N)
+Vs = (V,w) 
+result = CuArray{Float64}([0.0])
+
+mpr = MapReduce(storeGlmem=true) # If storeGlmem=true, we store in mpr two vectors of size of order the number of blocks of the kernel
+mpr(identity, +, result, Vs) # Kernel and global memory are initialized at first run 
+```
+"""
 mutable struct MapReduce
     config::Union{MapReduceConfig,Nothing}
     glmem::Union{MapReduceGlmem,Nothing}
     storeGlmem::Bool
 end
+
 MapReduce(; storeGlmem=true) = MapReduce(nothing, nothing, storeGlmem)
+
 function (mpr::MapReduce)(f::F, op::O, result::AbstractGPUVector{T}, Vs::Tuple{Vararg{AbstractGPUVector{T}}}; reinit=false) where {T,F<:Function,O<:Function}
     reinit = reinit || mpr.config === nothing || T !== mpr.config.T || typeof(mpr.config.f) !== F || typeof(mpr.config.op) !== O || length(Vs) != mpr.config.lengthVs
     if reinit # Kernel config
