@@ -36,11 +36,11 @@ mpr(identity, +, result, Vs) # Kernel and Global memory are initialized at first
 Vs = (V, w)
 mpr = MapReduce(storeGlmem=true)
 mpr(*, +, result, Vs) # Kernel and Global memory are initialized at first run 
-@btime CUDA.@sync mpr(*, +, $result, $Vs) # 31.6 μs
+@btime CUDA.@sync mpr(*, +, $result, $Vs) # 31.6 μs (better than CuBlas)
 
 # Overhead
 
-## If we do not store in global memory (we unsafe_free! at each run)
+## If we do not store in global memory (we unsafe_free glmem at each run and reallocate)
 #%%
 
 Vs = (V, w)
@@ -55,3 +55,10 @@ Vs = (V, w)
 mpr = MapReduce()
 mpr(*, +, result, Vs) # Kernel and Global memory are initialized at first run 
 @btime CUDA.@sync mpr(*, +, $result, $Vs; reinit=true) # 40.5 μs (slightly worse than CuBlas)
+
+## If we do not relaunch kernel but send result to cpu through unified memory
+
+Vs = (V, w)
+mpr = MapReduce()
+mpr(*, +, result_unified, Vs) # Kernel and Global memory are initialized at first run 
+@btime CUDA.@sync mpr(*, +, $result_unified, $Vs; reinit=false) # 39.7 μs (slightly worse than CuBlas)
