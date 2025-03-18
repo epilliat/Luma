@@ -1,4 +1,4 @@
-include("../mapreduce.jl")
+include("../src/mapreduce.jl")
 
 using BenchmarkTools
 

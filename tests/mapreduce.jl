@@ -1,3 +1,3 @@
-include("../mapreduce.jl")
+include("../src/mapreduce.jl")
 
 # Empty for now
