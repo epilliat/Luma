@@ -36,7 +36,7 @@ mpr(identity, +, result, Vs) # Kernel and Global memory are initialized at first
 Vs = (V, w)
 mpr = MapReduce(storeGlmem=true)
 mpr(*, +, result, Vs) # Kernel and Global memory are initialized at first run 
-@btime CUDA.@sync mpr(*, +, $result, $Vs) # 31.6 μs (better than CuBlas)
+@btime CUDA.@sync mpr(*, +, $result, $Vs) # 31.6 μs (slightly better than CuBlas)
 
 # Overhead
 
