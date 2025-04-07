@@ -1,23 +1,17 @@
-@generated function powers_of_two(::Val{N})::Tuple{Vararg{UInt32}} where {N}
-    # Input validation
-    if N <= 0
-        throw(ArgumentError("Input N must be positive"))
+@generated function total_glmem_length(::Val{blocks}, ::Val{warpsize})::Int where {blocks,warpsize}
+    total = rem = blocks
+    while rem != 1
+        rem = cld(rem, warpsize)
+        total += rem
     end
+    return :($total)
+end
 
-    # Calculate ceil(log2(N)) using the simpler function
+@generated function powers_of_two(::Val{N})::Tuple{Vararg{Int}} where {N}
     log2_ceiling = ceil(Int, log2(N >> 1))
 
-    V = [UInt32(2^i) for i in 0:log2_ceiling]
+    V = [2^i for i in 0:log2_ceiling]
 
     # Create expression to return a tuple of the V
     return :($(Expr(:tuple, V...)))
-end
-
-function total_glmem_length(blocks; warpsize=32)
-    total = remainder = blocks
-    while remainder != 1
-        remainder = cld(remainder, warpsize)
-        total += remainder
-    end
-    return total
 end

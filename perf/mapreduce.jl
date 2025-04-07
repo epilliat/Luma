@@ -6,6 +6,7 @@ using BenchmarkTools
 N = Int(1e6)
 V = CuArray{Float64}(1:N |> collect)
 w = CUDA.ones(Float64, N)
+Vs = (V, w)
 result = CuArray{Float64}([0.0]) # We store the result in the GPU
 result_unified = CuArray{Float64,1,CUDA.UnifiedMemory}([0.0]) # Or in the CPU (less efficient)
 
