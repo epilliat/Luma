@@ -4,8 +4,7 @@ include("../src/mapreduce.jl")
 using Test
 
 
-
-@testset "MapReduce, *, +" begin
+function test1()
     mpr = MapReduce(storeGlmem=true)
     X = (1, 10, 100, 1000, 2000, 5000, 10000, 100000)
     n = length(X)
@@ -20,4 +19,12 @@ using Test
     end
     result_cpu = Array(result)
     @test all(isapprox.(l - result_cpu, 0; atol=1e-8))
+end
+
+
+test1()
+
+
+@testset "MapReduce, *, +" begin
+    test1()
 end

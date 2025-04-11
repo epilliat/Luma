@@ -1,5 +1,8 @@
 include("../src/mapreduce.jl")
 
+# Update: Performances are much better with the linux open-source driver (at least +10% speed) than with proprietary.
+
+
 using BenchmarkTools
 
 
@@ -14,15 +17,15 @@ result_unified = CuArray{Float64,1,CUDA.UnifiedMemory}([0.0]) # Or in the CPU (l
 
 ## CUDA.jl (mapreduce)
 
-@btime CUDA.@sync sum($V) # 56.7 μs
-@btime CUDA.@sync mapreduce(identity, +, V) # 54 μs
-@btime CUDA.@sync sum!($result, $V) # 67.5 (?!)
+@btime CUDA.@sync sum($V) # 36 μs
+@btime CUDA.@sync mapreduce(identity, +, V) # 36.5 μs
+@btime CUDA.@sync sum!($result, $V) # 37 μs (?!)
 
 ## Luma
 
 mpr = MapReduce(storeGlmem=true)
-mpr(identity, +, result, Vs) # Kernel and Global memory are initialized at first run 
-@btime CUDA.@sync mpr(identity, +, $result, $Vs) #27.8 μs
+mpr(identity, +, result, (V,)) # Kernel and Global memory are initialized at first run 
+@btime CUDA.@sync mpr(identity, +, $result, ($V,)) #24 μs
 
 
 
@@ -30,14 +33,16 @@ mpr(identity, +, result, Vs) # Kernel and Global memory are initialized at first
 
 ## CuBlas
 
-@btime CUDA.@sync CUDA.dot($V, $w) # 39.2 μs
+@btime CUDA.@sync CUDA.dot($V, $w) # 36.5 μs
 
 ## Luma
 
 Vs = (V, w)
 mpr = MapReduce(storeGlmem=true)
 mpr(*, +, result, Vs) # Kernel and Global memory are initialized at first run 
-@btime CUDA.@sync mpr(*, +, $result, $Vs) # 31.6 μs (slightly better than CuBlas)
+@btime CUDA.@sync mpr(*, +, $result, $Vs) # 27.6 μs (slightly better than CuBlas)
+
+
 
 # Overhead
 
