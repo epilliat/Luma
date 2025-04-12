@@ -1,11 +1,14 @@
-# Luma
+---
+title: "Luma"
+format: gfm
+---
 
 
 This is an experimental Repo for CUDA parallel computing in Julia.
 
 # Examples of usage
 
-``` julia
+```julia
 N = Int(1e6)
 V = CuArray{Float64}(1:N |> collect)
 w = CUDA.ones(Float64, N)
@@ -16,6 +19,7 @@ mpr = MapReduce(storeGlmem=true) # If storeGlmem=true, we store in mpr two vecto
 mpr(identity, +, result, Vs) # Kernel and global memory are initialized at first run 
 ```
 
+
 # Performances
 
 See perf folder for more details.
@@ -24,7 +28,7 @@ See perf folder for more details.
 
 Luma VS CUDA:
 
-``` julia
+```julia
 @btime CUDA.@sync mpr(identity, +, $result, ($V,)) #(LUMA),24 μs
 @btime CUDA.@sync sum!($result, $V) # (CUDA.jl) 37 μs
 ```
@@ -33,7 +37,7 @@ Luma VS CUDA:
 
 Luma VS CuBlas:
 
-``` julia
+```julia
 @btime CUDA.@sync mpr(*, +, $result, ($V, $w)) # (LUMA), 27.6 μs
 @btime CUDA.@sync CUDA.dot($V, $w) # (CuBlas), 36.5 μs
 ```
@@ -42,7 +46,7 @@ Luma VS CuBlas:
 
 `V1` and `V2` are of size $10^6$ and $10^8$, respectively.
 
-``` julia
+```julia
 ### LUMA
 @btime CUDA.@sync acc(identity, +, $R1, $V1) # 108.2 μs
 @btime CUDA.@sync acc(identity, +, $R2, $V2) # 19 ms
@@ -50,4 +54,5 @@ Luma VS CuBlas:
 ### CUDA.jl
 @btime CUDA.@sync accumulate!(+, R1, V1) # 301 μs
 @btime CUDA.@sync accumulate!(+, R2, V2) # 35.1 ms
+
 ```

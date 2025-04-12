@@ -1,5 +1,6 @@
 {
     "cSpell.enabledFileTypes": {
-        "julia": false
+        "julia": false,
+        "quarto": false
     }
 }

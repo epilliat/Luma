@@ -1,7 +1,5 @@
 include("../src/mapreduce.jl")
 
-# Update: Performances are much better with the linux open-source driver (at least +10% speed) than with proprietary.
-
 
 using BenchmarkTools
 
@@ -40,7 +38,7 @@ mpr(identity, +, result, (V,)) # Kernel and Global memory are initialized at fir
 Vs = (V, w)
 mpr = MapReduce(storeGlmem=true)
 mpr(*, +, result, Vs) # Kernel and Global memory are initialized at first run 
-@btime CUDA.@sync mpr(*, +, $result, $Vs) # 27.6 μs (slightly better than CuBlas)
+@btime CUDA.@sync mpr(*, +, $result, $Vs) # 27.3 μs (better than CuBlas)
 
 
 
@@ -52,7 +50,7 @@ mpr(*, +, result, Vs) # Kernel and Global memory are initialized at first run
 Vs = (V, w)
 mpr = MapReduce(storeGlmem=false)
 mpr(*, +, result, Vs) # Kernel and Global memory are initialized at first run 
-@btime CUDA.@sync mpr(*, +, $result, $Vs) # 37.1 μs (slightly better than CuBlas)
+@btime CUDA.@sync mpr(*, +, $result, $Vs) # 32.1 μs (slightly better than CuBlas)
 
 ## If we relaunch kernel parameterization at each run
 #%%
@@ -60,11 +58,11 @@ mpr(*, +, result, Vs) # Kernel and Global memory are initialized at first run
 Vs = (V, w)
 mpr = MapReduce()
 mpr(*, +, result, Vs) # Kernel and Global memory are initialized at first run 
-@btime CUDA.@sync mpr(*, +, $result, $Vs; reinit=true) # 40.5 μs (slightly worse than CuBlas)
+@btime CUDA.@sync mpr(*, +, $result, $Vs; reinit=true) # 32.45 μs (slightly better than CuBlas)
 
 ## If we do not relaunch kernel but send result to cpu through unified memory
 
 Vs = (V, w)
 mpr = MapReduce()
 mpr(*, +, result_unified, Vs) # Kernel and Global memory are initialized at first run 
-@btime CUDA.@sync mpr(*, +, $result_unified, $Vs; reinit=false) # 39.7 μs (slightly worse than CuBlas)
+@btime CUDA.@sync mpr(*, +, $result_unified, $Vs; reinit=false) # 30.4 μs (slightly better than CuBlas)

@@ -2,16 +2,16 @@
 
 
 using CUDA, Random
-import CUDA: AbstractGPUVector
+import CUDA: AbstractGPUVector, AbstractGPUMatrix, AbstractGPUArray
 
 
-FLAG_TYPE = UInt128 # Risk of error of order 1/2^64
-PTR_TYPE = Int
-FENCE_TYPE = UInt16
+const FLAG_TYPE = UInt128 # Risk of error of order 1/2^64
+const PTR_TYPE = Int
+const FENCE_TYPE = UInt16
 
-FLAG_AR = CuArray{FLAG_TYPE,1,CUDA.DeviceMemory}(undef, 0) # This is to determine the parameters of the kernel without redefining a FLAG CuArray each time.
-PTR_AR = CuArray{PTR_TYPE,1,CUDA.DeviceMemory}(undef, 0) # This is to determine the parameters of the kernel without redefining a FLAG CuArray each time.
-FENCE_MAT = CuMatrix{PTR_TYPE,CUDA.DeviceMemory}(undef, (0, 0)) # This is to determine the parameters of the kernel without redefining a FLAG CuArray each time.
+const FLAG_AR1 = CuArray{FLAG_TYPE,1,CUDA.DeviceMemory}(undef, 0) # This is to determine the parameters of the kernel without redefining a FLAG CuArray each time.
+const PTRS_AR1 = CuArray{PTR_TYPE,1,CUDA.DeviceMemory}(undef, 0) # This is to determine the parameters of the kernel without redefining a FLAG CuArray each time.
+const FENCES_AR2 = CuMatrix{FENCE_TYPE,CUDA.DeviceMemory}(undef, (0, 0)) # This is to determine the parameters of the kernel without redefining a FLAG CuArray each time.
 
 
 

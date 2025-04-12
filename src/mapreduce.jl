@@ -58,7 +58,7 @@ function (mpr::MapReduce)(f::F, op::O, result::AbstractGPUVector{Outf}, Vs::NTup
         source = reinterpret(T, bytes)[1]
         #out = f((source for _ in (1:K))...) # Example of an element of right type
         #PARTIAL = CuArray{typeof(out)}(undef, 0) # Example of cuArray of right type. We take the cuarray result instead
-        kernel = @cuda launch = false mapreducekernel(f, op, result, Vs, result, FLAG_AR, FLAG_TYPE(0), 200)
+        kernel = @cuda launch = false mapreducekernel(f, op, result, Vs, result, FLAG_AR1, FLAG_TYPE(0), 200)
         config = launch_configuration(kernel.fun; shmem=(threads) -> 32 * sizeof(Outf))
         mpr.config = MapReduceConfig(
             kernel,
