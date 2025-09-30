@@ -1,12 +1,14 @@
+include("helpers.jl")
+using BenchmarkTools
 function mapreducekernel(
     f::F, op::O,
     result::AbstractVector{Outf},
     Vs::NTuple{K,AbstractVector{T}},
     partial::AbstractVector{Outf},
     flag::AbstractVector{FLAG_TYPE},
-    targetflag::FLAG_TYPE
+    targetflag::FLAG_TYPE,
+    Left::Integer, Right::Integer, acc::Bool
 ) where {F<:Function,O<:Function,K,T,Outf}
-    n = Int(length(Vs[1]))
     blocks = Int(gridDim().x)
     threads = Int(blockDim().x)
     warpsz = 32
@@ -22,13 +24,13 @@ function mapreducekernel(
 
     #nwp = cld(threads, warpsz)
 
-    chunksize = cld(n, blocks)
+    chunksize = cld(Right - Left + 1, blocks)
     shmem_res = @cuDynamicSharedMem(Outf, 32)#Dynamic mem uses more registers
 
-    block_start = (bid - 1) * chunksize + 1
-    block_end = min(block_start + chunksize - 1, n)
+    block_start = (bid - 1) * chunksize + Left
+    block_end = min(block_start + chunksize - 1, Right)
 
-    block_start > n && return
+    block_start > Right && return
 
     @inbounds if length(Vs) == 1
         i = block_start + tid - 1
@@ -108,7 +110,11 @@ function mapreducekernel(
         (threads > block_end - block_start + 1 && (lane == cld(block_end - block_start + 1, warpsz)))
     )
         if blocks == 1
-            result[1] = val
+            if acc
+                result[1] = op(result[1], val)
+            else
+                result[1] = val
+            end
             return
         end
         partial[bid] = val
@@ -146,7 +152,11 @@ function mapreducekernel(
             shifted_cwid = shift + cwid
 
             if cld(clength, warpsz) == 1
-                result[1] = val
+                if acc
+                    result[1] = op(result[1], val)
+                else
+                    result[1] = val
+                end
                 return
             else
                 partial[shifted_cwid] = val
@@ -164,3 +174,89 @@ function mapreducekernel(
     end
     return
 end
+
+N = 10000000
+T = Float64
+L2max = Int(CUDA.attribute(CuDevice(0), CUDA.CU_DEVICE_ATTRIBUTE_L2_CACHE_SIZE) / sizeof(T))
+Left = 1
+Right = floor(Int, L2max / 2)
+Right = 3000000
+#cld(threads, 32)
+V = CuArray{T}(1:N)
+#V = CUDA.rand(N)
+result = CuArray{T}([0.0])
+#test = CUDA.fill(0.0, 40000)
+w = CUDA.ones(T, N)
+Vs = (V,)
+f = *
+opp = +
+
+partial = CuArray{T}(undef, 0)
+flag = CuArray{FLAG_TYPE,1,CUDA.DeviceMemory}(undef, 0)
+#flag = CuArray{FLAG_TYPE,1,CUDA.DeviceMemory}(undef, glmemlength)
+
+targetflag = rand(FLAG_TYPE)
+
+kernel = @cuda launch = false mapreducekernel(f, opp, result, Vs, partial, flag, targetflag, 2, 50, false)
+config = launch_configuration(kernel.fun)
+threads = min(config.threads, N)
+threads = config.threads
+#threads = 32
+
+
+blocks = min(config.blocks, cld(Right - Left + 1, threads))
+#blocks = min(10, cld(N, threads))
+#blocks = 20
+strd = blocks * threads
+#threads=320
+#blocks=40
+glmemlength = total_glmem_length(Val(blocks), Val(32))
+partial = CuArray{T}(undef, glmemlength)
+
+flag = CuArray{FLAG_TYPE,1,CUDA.DeviceMemory}(undef, glmemlength)
+shmem = 32 * sizeof(T)
+
+#CUDA.@sync @cuda shmem = shmem_size threads = threads blocks = blocks mapreducekernel(f, opp, result, Vs, partial, flag, targetflag, glmemlength, 0.0)
+CUDA.@sync kernel(f, opp, result, Vs, partial, flag, targetflag, Left, Right, true; shmem=shmem, threads=threads, blocks=blocks)
+result, sum(Left:Right)
+
+#x = CUDA.@profile CUDA.@sync kernel(f, opp, result, Vs, partial, flag, targetflag, Left, Right, false; shmem=shmem, threads=threads, blocks=blocks)
+#%%
+U = (Vs[1][Left:Right],)
+x = CUDA.@profile CUDA.@sync kernel(f, opp, result, (view(V, Left:Right),), partial, flag, targetflag, 1, Right - Left + 1; shmem=shmem, threads=threads, blocks=blocks)
+#%%
+#%%
+@btime CUDA.@sync kernel($f, $opp, $result, $Vs, $partial, $flag, $targetflag; shmem=shmem, threads=threads, blocks=blocks)
+#%%
+CUDA.@time kernel(f, opp, result, Vs, partial, flag, targetflag; shmem=shmem, threads=threads, blocks=blocks)
+
+x.device.dt = (x.device.stop - x.device.start) * 1e6
+CSV.write("./test.csv", x.device)
+x.device.registers
+#x = CUDA.@elapsed CUDA.@sync kernel(f, opp, result, Vs, partial, flag, targetflag, glmemlength; shmem=shmem, threads=threads, blocks=blocks)
+x
+
+#%%
+x = CUDA.@bprofile time = 0.05 CUDA.@sync CUDA.dot(V, w)
+x = CUDA.@elapsed CUDA.@sync CUDA.dot(V, w)
+u = CUDA.@time CUDA.@sync CUDA.dot(V, w)
+CUDA.@timed CUDA.@sync CUDA.dot(V, w)
+x.device.dt = (x.device.stop - x.device.start) * 1e6
+#%%
+CSV.write("./test_cublas.csv", x.device)
+#%%
+using CSV
+CSV.write("./test.csv", x.device)
+#%%
+t = 0
+function bench(f, opp, result, Vs, partial, flag, targetflag; shmem=shmem, threads=threads, blocks=blocks)
+    t = 0
+    for i in (1:10000)
+        u = time()
+        CUDA.@sync kernel(f, opp, result, Vs, partial, flag, targetflag; shmem=shmem, threads=threads, blocks=blocks)
+        t += time() - u
+    end
+    return t / 10000
+end
+bench(f, opp, result, Vs, partial, flag, targetflag) * 1e6
+@btime

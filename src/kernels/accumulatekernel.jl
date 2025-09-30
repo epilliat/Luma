@@ -49,7 +49,7 @@ function accumulatekernel(
             if chunk == 1
                 result[chlane] = val
             else #&& chlane <= r
-                result[chlane] = val + result[startchunk-1]
+                result[chlane] = op(result[startchunk-1], val)
             end
         end
         startchunk += warpsz

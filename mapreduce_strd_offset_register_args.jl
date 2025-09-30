@@ -1,11 +1,12 @@
+include("helpers.jl")
+using BenchmarkTools
 function mapreducekernel(
-    f::F, op::O,
     result::AbstractVector{Outf},
     Vs::NTuple{K,AbstractVector{T}},
     partial::AbstractVector{Outf},
     flag::AbstractVector{FLAG_TYPE},
     targetflag::FLAG_TYPE
-) where {F<:Function,O<:Function,K,T,Outf}
+) where {K,T,Outf}
     n = Int(length(Vs[1]))
     blocks = Int(gridDim().x)
     threads = Int(blockDim().x)
@@ -23,7 +24,7 @@ function mapreducekernel(
     #nwp = cld(threads, warpsz)
 
     chunksize = cld(n, blocks)
-    shmem_res = @cuDynamicSharedMem(Outf, 32)#Dynamic mem uses more registers
+    shmem_res = @cuDynamicSharedMem(Outf, 32)
 
     block_start = (bid - 1) * chunksize + 1
     block_end = min(block_start + chunksize - 1, n)
@@ -32,41 +33,26 @@ function mapreducekernel(
 
     @inbounds if length(Vs) == 1
         i = block_start + tid - 1
-        val = f(Vs[1][min(i, block_end)])
+        val = (Vs[1][i])
         last = block_end - 4 * threads
         while i <= last
             i += threads
-            v1 = f(Vs[1][i])
+            v1 = (Vs[1][i])
             i += threads
-            v2 = f(Vs[1][i])
+            v2 = (Vs[1][i])
             i += threads
-            v3 = f(Vs[1][i])
+            v3 = (Vs[1][i])
             i += threads
-            v4 = f(Vs[1][i])
+            v4 = (Vs[1][i])
 
-            val = op(val, v1)
-            val = op(val, v2)
-            val = op(val, v3)
-            val = op(val, v4)
+            val = +(val, v1)
+            val = +(val, v2)
+            val = +(val, v3)
+            val = +(val, v4)
         end
-        i += threads
-        while i <= block_end
-            val = op(val, f(Vs[1][i]))
+        while i <= block_end - threads
             i += threads
-        end
-    elseif length(Vs) == 2
-        val = f(Vs[1][min(block_start + tid - 1, block_end)], Vs[2][min(block_start + tid - 1, block_end)])
-        i = block_start + threads + tid - 1
-        while i <= block_end
-            val = op(val, f(Vs[1][i], Vs[2][i]))#
-            i += threads
-        end
-    else
-        val = f((V[min(block_start + tid - 1, block_end)] for V in Vs)...)# Somehow less optimized than two previous functions
-        #i = block_start + threads + tid - 1
-        for i in (block_start+threads+tid-1:threads:block_end)
-            val = op(val, f((Vs[k][i] for k in (1:length(Vs)))...))#
-            i += threads
+            val = +(val, (Vs[1][i]))
         end
     end
     #return val
@@ -75,7 +61,7 @@ function mapreducekernel(
     while offset < warpsz
         shuffled = shfl_up_sync(0xffffffff, val, offset)
         if lane > offset
-            val = op(val, shuffled)
+            val = +(val, shuffled)
         end
         offset <<= 1
     end
@@ -98,7 +84,7 @@ function mapreducekernel(
     while offset < warpsz
         shuffled = shfl_up_sync(0xffffffff, val, offset)
         if lane > offset
-            val = op(val, shuffled)
+            val = +(val, shuffled)
         end
         offset <<= 1
     end
@@ -131,12 +117,12 @@ function mapreducekernel(
             end
             threadfence() # !!Must be in the loop otherwise the result is undefined
         end
-        val = partial[min(shift + cid, shift + clength)]
+        val = partial[shift+cid]
         offset = 0x00000001
         while offset < warpsz
             shuffled = shfl_up_sync(0xffffffff, val, offset)
             if lane > offset
-                val = op(val, shuffled)
+                val = +(val, shuffled)
             end
             offset <<= 1
         end
@@ -164,3 +150,49 @@ function mapreducekernel(
     end
     return
 end
+
+N = 1000000
+
+#cld(threads, 32)
+T = Float32
+V = CuArray{T}(1:N)
+#V = CUDA.rand(N)
+result = CuArray{T}([0.0])
+#test = CUDA.fill(0.0, 40000)
+w = CUDA.ones(T, N)
+Vs = (V,)
+f = *
+opp = +
+
+partial = CuArray{T}(undef, 0)
+flag = CuArray{FLAG_TYPE,1,CUDA.DeviceMemory}(undef, 0)
+#flag = CuArray{FLAG_TYPE,1,CUDA.DeviceMemory}(undef, glmemlength)
+
+targetflag = rand(FLAG_TYPE)
+
+kernel = @cuda launch = false mapreducekernel(result, Vs, partial, flag, targetflag)
+config = launch_configuration(kernel.fun)
+threads = min(config.threads, N)
+threads = config.threads
+#threads = 32
+
+
+blocks = min(config.blocks, cld(N, threads))
+#blocks = min(10, cld(N, threads))
+#blocks = 20
+strd = blocks * threads
+#threads=320
+#blocks=40
+glmemlength = total_glmem_length(Val(blocks), Val(32))
+partial = CuArray{T}(undef, glmemlength)
+
+flag = CuArray{FLAG_TYPE,1,CUDA.DeviceMemory}(undef, glmemlength)
+shmem = 32 * sizeof(T)
+
+#CUDA.@sync @cuda shmem = shmem_size threads = threads blocks = blocks mapreducekernel(f, opp, result, Vs, partial, flag, targetflag, glmemlength, 0.0)
+CUDA.@sync kernel(result, Vs, partial, flag, targetflag; shmem=shmem, threads=threads, blocks=blocks)
+result, sum(1:N)
+
+#%%
+@btime CUDA.@sync kernel($result, $Vs, $partial, $flag, $targetflag; shmem=shmem, threads=threads, blocks=blocks)
+CUDA.@profile CUDA.@sync kernel(f, opp, result, Vs, partial, flag, targetflag, glmemlength; shmem=shmem, threads=threads, blocks=blocks)

@@ -1,16 +1,14 @@
 include("../helpers.jl")
 include("kernels/mapreducekernel.jl")
 
-
 struct MapReduceConfig{F<:Function,O<:Function,T}
     kernel::CUDA.HostKernel
     config::@NamedTuple{blocks::Int, threads::Int} #Should be the config given by the kernel
     shmemsize::Int
     f::F
     op::O
-    lengthVs::Int
+    lengthVs::Int #either a reduction on a vector, or on two vector like dot product or on (1, ..., lengthVs) vectors
     source::T
-    #out::Outf # Example of out type of f: T -> Outf.
 end
 
 struct MapReduceGlmem{Outf}
@@ -58,7 +56,7 @@ function (mpr::MapReduce)(f::F, op::O, result::AbstractGPUVector{Outf}, Vs::NTup
         source = reinterpret(T, bytes)[1]
         #out = f((source for _ in (1:K))...) # Example of an element of right type
         #PARTIAL = CuArray{typeof(out)}(undef, 0) # Example of cuArray of right type. We take the cuarray result instead
-        kernel = @cuda launch = false mapreducekernel(f, op, result, Vs, result, FLAG_AR1, FLAG_TYPE(0), 200)
+        kernel = @cuda launch = false mapreducekernel(f, op, result, Vs, result, FLAG_AR1, FLAG_TYPE(0))
         config = launch_configuration(kernel.fun; shmem=(threads) -> 32 * sizeof(Outf))
         mpr.config = MapReduceConfig(
             kernel,
@@ -79,7 +77,7 @@ function (mpr::MapReduce)(f::F, op::O, result::AbstractGPUVector{Outf}, Vs::NTup
     end
 
     N = length(Vs[1])
-    threads = min(mpr.config.config.threads, N)
+    threads = mpr.config.config.threads
     blocks = min(mpr.config.config.blocks, cld(N, threads))
     targetflag = rand(FLAG_TYPE)
     glmemlength = total_glmem_length(Val(blocks), Val(32)) # ***

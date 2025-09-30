@@ -32,3 +32,5 @@ end
     # Create expression to return a tuple of the V
     return :($(Expr(:tuple, V...)))
 end
+
+typeof(powers_of_two(Val(32))[1])
