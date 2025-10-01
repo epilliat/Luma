@@ -15,13 +15,37 @@ bench = DataFrame()
 algo = "Dot"
 
 
-T = Float32
-N = Int(1e8)
+T = Float64
+N = Int(100000000)
 V = CuArray{T}(1:N |> collect)
 w = CUDA.ones(T, N)
 Vs = (V, w)
 result = CuArray{T}([0.0]) # We store the result in the GPU
 result_unified = CuArray{T,1,CUDA.UnifiedMemory}([0.0]) # Or in the CPU (less efficient)
+
+#%%
+name = "Luma"
+mpr = MapReduce(storeGlmem=true)
+mpr(*, +, result, Vs) # Kernel and Global memory are initialized at first run 
+
+result
+#%%
+start_time = time()
+while time() - start_time < 0.500  # 500ms warm-up
+    CUDA.@sync mpr(*, +, result, Vs)
+end
+prof = CUDA.@bprofile time = 0.05 mpr(*, +, result, Vs)
+dt = 0
+dts = []
+while dt <= 2 * tmax_timed
+    timed = (CUDA.@timed mpr(*, +, result, Vs))#(CUDA.@timed CUDA.@sync eval(exp_expr))[:time]
+    u = timed[:time]
+    dt += u
+    push!(dts, u)
+end
+timed = (CUDA.@timed CUDA.@sync mpr(*, +, result, Vs))
+benchmark_summary!(prof, timed, dts, T, N, name, algo, bench)
+bench
 #%%
 name = "Cublas"
 start_time = time()
@@ -41,25 +65,7 @@ timed = (CUDA.@timed CUDA.@sync CUDA.dot(V, w))
 benchmark_summary!(prof, timed, dts, T, N, name, "Sum", bench)
 benchmark_summary!(prof, timed, dts, T, N, name, "Dot", bench)
 #push all the infos
-#%%
-name = "Luma"
-mpr = MapReduce(storeGlmem=true)
-mpr(*, +, result, Vs) # Kernel and Global memory are initialized at first run 
-start_time = time()
-while time() - start_time < 0.500  # 500ms warm-up
-    CUDA.@sync mpr(*, +, result, Vs)
-end
-prof = CUDA.@bprofile time = 0.05 mpr(*, +, result, Vs)
-dt = 0
-dts = []
-while dt <= 2 * tmax_timed
-    timed = (CUDA.@timed mpr(*, +, result, Vs))#(CUDA.@timed CUDA.@sync eval(exp_expr))[:time]
-    u = timed[:time]
-    dt += u
-    push!(dts, u)
-end
-timed = (CUDA.@timed CUDA.@sync mpr(*, +, result, Vs))
-benchmark_summary!(prof, timed, dts, T, N, name, algo, bench)
+
 
 #%%
 name = "CUDA.jl"

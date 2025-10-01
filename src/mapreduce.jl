@@ -9,6 +9,7 @@ struct MapReduceConfig{F<:Function,O<:Function,T}
     op::O
     lengthVs::Int #either a reduction on a vector, or on two vector like dot product or on (1, ..., lengthVs) vectors
     source::T
+    L2length::Int
 end
 
 struct MapReduceGlmem{Outf}
@@ -56,7 +57,7 @@ function (mpr::MapReduce)(f::F, op::O, result::AbstractGPUVector{Outf}, Vs::NTup
         source = reinterpret(T, bytes)[1]
         #out = f((source for _ in (1:K))...) # Example of an element of right type
         #PARTIAL = CuArray{typeof(out)}(undef, 0) # Example of cuArray of right type. We take the cuarray result instead
-        kernel = @cuda launch = false mapreducekernel(f, op, result, Vs, result, FLAG_AR1, FLAG_TYPE(0))
+        kernel = @cuda launch = false mapreducekernel(f, op, result, Vs, result, FLAG_AR1, FLAG_TYPE(0), 1, 1, false)
         config = launch_configuration(kernel.fun; shmem=(threads) -> 32 * sizeof(Outf))
         mpr.config = MapReduceConfig(
             kernel,
@@ -64,7 +65,8 @@ function (mpr::MapReduce)(f::F, op::O, result::AbstractGPUVector{Outf}, Vs::NTup
             32 * sizeof(Outf),
             f, op,
             K,
-            source
+            source,
+            floor(Int, CUDA.attribute(CUDA.device(), CUDA.CU_DEVICE_ATTRIBUTE_L2_CACHE_SIZE) / (2 * K * sizeof(T))) #2 could be optimized here.
         )
     end
 
@@ -78,9 +80,15 @@ function (mpr::MapReduce)(f::F, op::O, result::AbstractGPUVector{Outf}, Vs::NTup
 
     N = length(Vs[1])
     threads = mpr.config.config.threads
-    blocks = min(mpr.config.config.blocks, cld(N, threads))
+    #glmemlength = total_glmem_length(Val(blocks), Val(32)) # ***
+    Left, Right = 1, N
+    optim = true
+    if optim
+        Right = min(N, mpr.config.L2length)
+    end
+    blocks = min(mpr.config.config.blocks, cld(Right - Left + 1, threads))
+
     targetflag = rand(FLAG_TYPE)
-    glmemlength = total_glmem_length(Val(blocks), Val(32)) # ***
     (mpr.config.kernel)(
         mpr.config.f, mpr.config.op,
         result,
@@ -88,11 +96,36 @@ function (mpr::MapReduce)(f::F, op::O, result::AbstractGPUVector{Outf}, Vs::NTup
         mpr.glmem.partial,
         mpr.glmem.flag,
         targetflag,
-        glmemlength;
+        Left, Right, false;
         shmem=mpr.config.shmemsize,
         threads=threads,
         blocks=blocks
     )
+    if optim && (mpr.config.L2length < N)
+        Left += mpr.config.L2length
+        while Left <= N
+            Right = min(Left + mpr.config.L2length - 1, N)
+
+            blocks = min(mpr.config.config.blocks, cld(min(Right, N) - Left + 1, threads))
+
+            targetflag = rand(FLAG_TYPE)
+            (mpr.config.kernel)(
+                mpr.config.f, mpr.config.op,
+                result,
+                Vs,
+                mpr.glmem.partial,
+                mpr.glmem.flag,
+                targetflag,
+                Left, min(Right, N), true;
+                shmem=mpr.config.shmemsize,
+                threads=threads,
+                blocks=blocks
+            )
+            Left += mpr.config.L2length
+
+        end
+    end
+
 
     if !mpr.storeGlmem
         CUDA.unsafe_free!(mpr.glmem.partial)

@@ -4,9 +4,9 @@ function mapreducekernel(
     Vs::NTuple{K,AbstractVector{T}},
     partial::AbstractVector{Outf},
     flag::AbstractVector{FLAG_TYPE},
-    targetflag::FLAG_TYPE
+    targetflag::FLAG_TYPE,
+    Left::Integer, Right::Integer, acc::Bool
 ) where {F<:Function,O<:Function,K,T,Outf}
-    n = Int(length(Vs[1]))
     blocks = Int(gridDim().x)
     threads = Int(blockDim().x)
     warpsz = 32
@@ -22,13 +22,13 @@ function mapreducekernel(
 
     #nwp = cld(threads, warpsz)
 
-    chunksize = cld(n, blocks)
+    chunksize = cld(Right - Left + 1, blocks)
     shmem_res = @cuDynamicSharedMem(Outf, 32)#Dynamic mem uses more registers
 
-    block_start = (bid - 1) * chunksize + 1
-    block_end = min(block_start + chunksize - 1, n)
+    block_start = (bid - 1) * chunksize + Left
+    block_end = min(block_start + chunksize - 1, Right)
 
-    block_start > n && return
+    block_start > Right && return
 
     @inbounds if length(Vs) == 1
         i = block_start + tid - 1
@@ -108,7 +108,11 @@ function mapreducekernel(
         (threads > block_end - block_start + 1 && (lane == cld(block_end - block_start + 1, warpsz)))
     )
         if blocks == 1
-            result[1] = val
+            if acc
+                result[1] = op(result[1], val)
+            else
+                result[1] = val
+            end
             return
         end
         partial[bid] = val
@@ -146,7 +150,11 @@ function mapreducekernel(
             shifted_cwid = shift + cwid
 
             if cld(clength, warpsz) == 1
-                result[1] = val
+                if acc
+                    result[1] = op(result[1], val)
+                else
+                    result[1] = val
+                end
                 return
             else
                 partial[shifted_cwid] = val

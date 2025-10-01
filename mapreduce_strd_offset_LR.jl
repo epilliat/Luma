@@ -175,19 +175,19 @@ function mapreducekernel(
     return
 end
 
-N = 10000000
+N = 1000000
 T = Float64
-L2max = Int(CUDA.attribute(CuDevice(0), CUDA.CU_DEVICE_ATTRIBUTE_L2_CACHE_SIZE) / sizeof(T))
+L2max = 3145728
 Left = 1
 Right = floor(Int, L2max / 2)
-Right = 3000000
+Right = N
 #cld(threads, 32)
 V = CuArray{T}(1:N)
 #V = CUDA.rand(N)
 result = CuArray{T}([0.0])
 #test = CUDA.fill(0.0, 40000)
 w = CUDA.ones(T, N)
-Vs = (V,)
+Vs = (V, w)
 f = *
 opp = +
 
@@ -197,7 +197,7 @@ flag = CuArray{FLAG_TYPE,1,CUDA.DeviceMemory}(undef, 0)
 
 targetflag = rand(FLAG_TYPE)
 
-kernel = @cuda launch = false mapreducekernel(f, opp, result, Vs, partial, flag, targetflag, 2, 50, false)
+kernel = @cuda launch = false mapreducekernel(f, opp, result, Vs, partial, flag, targetflag, 2, 5, false)
 config = launch_configuration(kernel.fun)
 threads = min(config.threads, N)
 threads = config.threads
@@ -217,10 +217,16 @@ flag = CuArray{FLAG_TYPE,1,CUDA.DeviceMemory}(undef, glmemlength)
 shmem = 32 * sizeof(T)
 
 #CUDA.@sync @cuda shmem = shmem_size threads = threads blocks = blocks mapreducekernel(f, opp, result, Vs, partial, flag, targetflag, glmemlength, 0.0)
-CUDA.@sync kernel(f, opp, result, Vs, partial, flag, targetflag, Left, Right, true; shmem=shmem, threads=threads, blocks=blocks)
-result, sum(Left:Right)
+Left = 1
+Right = floor(Int, L2max / 4)
+Right
+N / Right
 
-#x = CUDA.@profile CUDA.@sync kernel(f, opp, result, Vs, partial, flag, targetflag, Left, Right, false; shmem=shmem, threads=threads, blocks=blocks)
+blocks = min(config.blocks, cld(Right - Left + 1, threads))
+CUDA.@sync kernel(f, opp, result, Vs, partial, flag, targetflag, Left, Right, false; shmem=shmem, threads=threads, blocks=blocks)
+result, sum(Left:Right)
+x = CUDA.@profile CUDA.@sync kernel(f, opp, result, Vs, partial, flag, targetflag, Left, Right, false; shmem=shmem, threads=threads, blocks=blocks)
+#%%
 #%%
 U = (Vs[1][Left:Right],)
 x = CUDA.@profile CUDA.@sync kernel(f, opp, result, (view(V, Left:Right),), partial, flag, targetflag, 1, Right - Left + 1; shmem=shmem, threads=threads, blocks=blocks)

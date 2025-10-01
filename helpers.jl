@@ -13,6 +13,7 @@ const FLAG_AR1 = CuArray{FLAG_TYPE,1,CUDA.DeviceMemory}(undef, 0) # This is to d
 const PTRS_AR1 = CuArray{PTR_TYPE,1,CUDA.DeviceMemory}(undef, 0) # This is to determine the parameters of the kernel without redefining a FLAG CuArray each time.
 const FENCES_AR2 = CuMatrix{FENCE_TYPE,CUDA.DeviceMemory}(undef, (0, 0)) # This is to determine the parameters of the kernel without redefining a FLAG CuArray each time.
 
+const L2_CACHE_SIZE0 = CUDA.attribute(CuDevice(0), CUDA.CU_DEVICE_ATTRIBUTE_L2_CACHE_SIZE)
 
 
 @generated function total_glmem_length(::Val{blocks}, ::Val{warpsize})::Int where {blocks,warpsize}
